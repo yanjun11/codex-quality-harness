@@ -6,12 +6,28 @@ conformance:
   script:
     - |
       test_home="$(mktemp -d)"
+      trap 'rm -rf "$test_home"' EXIT
       if command -v python3.10 >/dev/null 2>&1; then
         qh_python="$(command -v python3.10)"
       else
+        # CI build tool only: pin the official wheel and hash; never change the Runner installation.
+        env -i PATH="$PATH" HOME="$test_home" python3 - "$test_home" <<'BOOTSTRAP'
+      import hashlib, io, sys, urllib.request, zipfile
+      from pathlib import Path
+      url = 'https://files.pythonhosted.org/packages/4b/a1/de02c0913726728eca56ee258875cbba9c7b0572c63f494fd9f55c7852e3/uv-0.13.4-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl'
+      with urllib.request.urlopen(url, timeout=30) as response:
+          data = response.read(32 * 1024 * 1024)
+      if hashlib.sha256(data).hexdigest() != '05e4332791b4d55b6dde8695b7fa6079b26991519f44760887c5dfbd5ca4fe53':
+          raise SystemExit('pinned uv wheel digest mismatch')
+      with zipfile.ZipFile(io.BytesIO(data)) as archive:
+          binary = archive.read('uv-0.13.4.data/scripts/uv')
+      path = Path(sys.argv[1]) / 'uv'
+      path.write_bytes(binary)
+      path.chmod(0o700)
+      BOOTSTRAP
         export UV_PYTHON_INSTALL_DIR="$test_home/runtime" UV_CACHE_DIR="$test_home/cache"
-        uv python install 3.10.18 --no-bin
-        qh_python="$(uv python find --no-project --managed-python 3.10.18)"
+        "$test_home/uv" python install 3.10.18 --no-bin
+        qh_python="$("$test_home/uv" python find --no-project --managed-python 3.10.18)"
       fi
       env -i PATH="$PATH" HOME="$test_home" LANG=C.UTF-8 PYTHONPATH=src "$qh_python" - <<'PY'
       import sys
