@@ -1,15 +1,14 @@
-image: python:3.10.18-bookworm
-
 stages: [test]
 
 conformance:
-  tags: [k8s-dev]
   stage: test
   script:
     - |
       test_home="$(mktemp -d)"
-      env -i PATH="$PATH" HOME="$test_home" LANG=C.UTF-8 PYTHONPATH=src python - <<'PY'
+      env -i PATH="$PATH" HOME="$test_home" LANG=C.UTF-8 PYTHONPATH=src python3 - <<'PY'
       import sys
+      assert sys.version_info[:2] == (3, 10), "Conformance requires Python 3.10, got " + sys.version
+      print("CI Python:", sys.version, flush=True)
       import unittest
       import xml.etree.ElementTree as ET
 
