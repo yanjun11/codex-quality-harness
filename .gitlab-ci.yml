@@ -1,6 +1,7 @@
 stages: [test]
 
 conformance:
+  tags: [pod-shell]
   stage: test
   script:
     - |
