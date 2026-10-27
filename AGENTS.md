@@ -1,7 +1,9 @@
 # Codex Quality Harness
 
-Read README.md before changing behavior. M0 must pass
-before implementing the unattended loop or expanding the general framework.
+Read README.md before changing behavior. The user explicitly prioritized Harness
+development on 2026-10-27 while retaining the failed Backend acceptance as a
+separate integration blocker. Runtime isolation must pass before an unattended
+loop starts; Backend failure must still block Backend code_ready and later gates.
 Do not turn missing evidence into success or substitute fixtures for live acceptance.
 Use Python 3.10 and the standard library. Run `PYTHONPATH=src python3.10 -m unittest discover -s tests`.
 

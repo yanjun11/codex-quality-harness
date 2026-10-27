@@ -30,17 +30,21 @@ def safe_environment():
     return {k: v for k, v in os.environ.items() if k in keys}
 
 
-def execute(argv, *, stdin=None, timeout=45, env=None):
+def execute(argv, *, stdin=None, timeout=45, env=None, on_start=None, should_cancel=None):
     start = time.monotonic()
-    # No shell, no inherited production variables, and bounded process-tree lifetime.
+    # No shell or inherited production variables; bound the ordinary process group.
     with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
         p = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=out, stderr=err,
                              env=env if env is not None else safe_environment(), start_new_session=True)
         cleanup_done = False
         try:
+            if on_start is not None:
+                on_start(p.pid)
             data = stdin.encode() if stdin is not None else None
             deadline = start + timeout
             while True:
+                if should_cancel is not None and should_cancel():
+                    raise KeyboardInterrupt()
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise subprocess.TimeoutExpired(argv, timeout)
@@ -67,11 +71,18 @@ def execute(argv, *, stdin=None, timeout=45, env=None):
             e.evidence_files = [str(failed / "stdout"), str(failed / "stderr")]
             raise
         finally:
-            # Model/tool descendants must not retain a writable session after return.
+            # Kill the ordinary group. Detached descendants require disposable source
+            # authority (Controller Builder workspaces), not a PID-only promise.
             if not cleanup_done:
                 try:
                     os.killpg(p.pid, signal.SIGKILL)
                 except ProcessLookupError:
+                    pass
+            pipe = getattr(p, "stdin", None)
+            if pipe is not None and not pipe.closed:
+                try:
+                    pipe.close()
+                except (OSError, BrokenPipeError):
                     pass
         out.seek(0)
         err.seek(0)
@@ -263,14 +274,15 @@ def fixture(root, role):
     return work, tcp, unix, config
 
 
-def sandbox_check(runtime, role):
+def sandbox_check(runtime, role, permission_factory=None):
     runtime = runtime.resolve()
     with tempfile.TemporaryDirectory(prefix="qh-") as temp:
         root = Path(temp).resolve()
         work, tcp, unix, config = fixture(root, role)
         try:
             env = {"PATH": str(runtime / "bin") + ":/usr/bin:/bin", "HOME": str(work), "TMPDIR": str(work)}
-            result = execute(["codex", "sandbox", "-P", "qh", "-C", str(work), *permission_args(work, runtime, role),
+            permissions = (permission_factory or permission_args)(work, runtime, role)
+            result = execute(["codex", "sandbox", "-P", "qh", "-C", str(work), *permissions,
                               "/usr/bin/env", "-i", *[k + "=" + v for k, v in env.items()],
                               str(runtime / "bin/python3.10"), "-I", str(work / "probe.py")],
                              env={**safe_environment(), "QH_SYNTHETIC_PRODUCTION_SECRET": "synthetic-not-a-credential"})
@@ -380,6 +392,18 @@ def api(path, *, binary=False):
     return result["stdout"] if binary else json.loads(result["stdout"])
 
 
+def api_pages(path):
+    values = []
+    for page in range(1, 11):
+        batch = api(path + ("&" if "?" in path else "?") + "per_page=100&page=" + str(page))
+        if not isinstance(batch, list):
+            raise ValueError("expected paginated API array")
+        values.extend(batch)
+        if len(batch) < 100:
+            return values
+    raise ValueError("API pagination exceeded bounded scan")
+
+
 def version_check():
     data = execute(["codex", "--version"])
     version = data["stdout"].decode(errors="replace").strip()
@@ -398,13 +422,9 @@ def authentication_check():
 def backend_check(project, pipeline, evidence_dir):
     base = "projects/" + str(project)
     p = api(base + "/pipelines/" + str(pipeline))
-    jobs = []
-    for page in range(1, 11):
-        batch = api(base + "/pipelines/" + str(pipeline) + "/jobs?per_page=100&page=" + str(page))
-        jobs.extend(batch)
-        if len(batch) < 100:
-            break
-    else:
+    try:
+        jobs = api_pages(base + "/pipelines/" + str(pipeline) + "/jobs")
+    except ValueError:
         return {"name": "backend_reports", "result": "blocked", "blockers": ["job pagination exceeded bounded scan"]}
     checks = []
     for name, minimum in [("unit_test", 86), ("integration_test", 30)]:

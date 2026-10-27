@@ -1,0 +1,50 @@
+image: python:3.10.18-bookworm
+
+stages: [test]
+
+conformance:
+  stage: test
+  script:
+    - |
+      test_home="$(mktemp -d)"
+      env -i PATH="$PATH" HOME="$test_home" LANG=C.UTF-8 PYTHONPATH=src python - <<'PY'
+      import sys
+      import unittest
+      import xml.etree.ElementTree as ET
+
+      suite = ET.Element('testsuite', name='quality-harness-conformance')
+
+      class Report(unittest.TextTestResult):
+          def case(self, test, kind=None, detail=''):
+              node = ET.SubElement(suite, 'testcase', classname=type(test).__module__ + '.' + type(test).__name__, name=test.id())
+              if kind:
+                  ET.SubElement(node, kind, message=detail[:200]).text = detail
+
+          def addSuccess(self, test):
+              super().addSuccess(test)
+              self.case(test)
+
+          def addFailure(self, test, err):
+              super().addFailure(test, err)
+              self.case(test, 'failure', self._exc_info_to_string(err, test))
+
+          def addError(self, test, err):
+              super().addError(test, err)
+              self.case(test, 'error', self._exc_info_to_string(err, test))
+
+          def addSkip(self, test, reason):
+              super().addSkip(test, reason)
+              self.case(test, 'skipped', reason)
+
+      result = unittest.TextTestRunner(verbosity=2, resultclass=Report).run(unittest.defaultTestLoader.discover('tests'))
+      suite.set('tests', str(len(suite)))
+      for tag, attribute in [('failure', 'failures'), ('error', 'errors'), ('skipped', 'skipped')]:
+          suite.set(attribute, str(sum(node.find(tag) is not None for node in suite)))
+      ET.ElementTree(suite).write('junit.xml', encoding='utf-8', xml_declaration=True)
+      sys.exit(0 if result.wasSuccessful() and result.testsRun == len(suite) and result.testsRun and not result.skipped and not result.expectedFailures else 1)
+      PY
+  artifacts:
+    when: always
+    paths: [junit.xml]
+    reports:
+      junit: junit.xml

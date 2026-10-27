@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codex-quality-harness"
-version = "0.0.1"
-description = "Codex quality harness capability acceptance (M0)"
+version = "0.1.0"
+description = "Local Codex controller, evidence gates and audited workflow adapters"
 requires-python = ">=3.10"
 dependencies = []
 
