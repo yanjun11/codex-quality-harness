@@ -6,7 +6,14 @@ conformance:
   script:
     - |
       test_home="$(mktemp -d)"
-      env -i PATH="$PATH" HOME="$test_home" LANG=C.UTF-8 PYTHONPATH=src python3 - <<'PY'
+      if command -v python3.10 >/dev/null 2>&1; then
+        qh_python="$(command -v python3.10)"
+      else
+        export UV_PYTHON_INSTALL_DIR="$test_home/runtime" UV_CACHE_DIR="$test_home/cache"
+        uv python install 3.10.18 --no-bin
+        qh_python="$(uv python find --no-project --managed-python 3.10.18)"
+      fi
+      env -i PATH="$PATH" HOME="$test_home" LANG=C.UTF-8 PYTHONPATH=src "$qh_python" - <<'PY'
       import sys
       assert sys.version_info[:2] == (3, 10), "Conformance requires Python 3.10, got " + sys.version
       print("CI Python:", sys.version, flush=True)
