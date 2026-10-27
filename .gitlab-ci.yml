@@ -3,6 +3,7 @@ image: python:3.10.18-bookworm
 stages: [test]
 
 conformance:
+  tags: [tmpfs]
   stage: test
   script:
     - |
