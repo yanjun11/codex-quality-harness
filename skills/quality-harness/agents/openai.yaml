@@ -1,0 +1,4 @@
+interface:
+  display_name: "Quality Harness"
+  short_description: "用确定性证据推进研发与审查，固定执行最小必要改动和优先复用约束"
+  default_prompt: "使用 $quality-harness 核对架构与验收，复用现有实现并验证当前阶段。"
